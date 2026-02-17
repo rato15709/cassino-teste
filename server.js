@@ -5,6 +5,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
 // Import routes
@@ -22,13 +23,16 @@ const Transaction = require('./models/Transaction');
 const Tournament = require('./models/Tournament');
 
 const app = express();
-const server = http.createServer(app);
-const io = socketIo(server, {
-    cors: {
-        origin: process.env.CLIENT_URL || "http://localhost:3000",
-        methods: ["GET", "POST"]
-    }
-});
+const isVercel = Boolean(process.env.VERCEL);
+const server = isVercel ? null : http.createServer(app);
+const io = isVercel
+    ? null
+    : socketIo(server, {
+        cors: {
+            origin: process.env.CLIENT_URL || "http://localhost:3000",
+            methods: ["GET", "POST"]
+        }
+    });
 
 // Middleware
 app.use(helmet());
@@ -44,15 +48,18 @@ const limiter = rateLimit({
 app.use('/api/', limiter);
 
 // Static files
-app.use(express.static('public'));
+app.use(express.static(__dirname));
 
 // Database connection
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/lucky-casino', {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-})
-.then(() => console.log('Conectado ao MongoDB'))
-.catch(err => console.error('Erro ao conectar ao MongoDB:', err));
+const mongoUri = process.env.MONGODB_URI;
+if (mongoUri) {
+    mongoose
+        .connect(mongoUri)
+        .then(() => console.log('Conectado ao MongoDB'))
+        .catch((err) => console.error('Erro ao conectar ao MongoDB:', err));
+} else {
+    console.warn('MONGODB_URI não configurada. Rotas que dependem de banco podem falhar.');
+}
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -65,6 +72,7 @@ app.use('/api/tournaments', tournamentRoutes);
 // Socket.IO for real-time features
 const connectedUsers = new Map();
 
+if (io) {
 io.on('connection', (socket) => {
     console.log('Usuário conectado:', socket.id);
 
@@ -301,6 +309,7 @@ io.on('connection', (socket) => {
         console.log('Usuário desconectado:', socket.id);
     });
 });
+}
 
 // API Routes
 app.get('/api/health', (req, res) => {
@@ -345,9 +354,11 @@ app.use('*', (req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
-    console.log(`Servidor rodando na porta ${PORT}`);
-    console.log(`Socket.IO rodando para real-time features`);
-});
+if (!isVercel) {
+    server.listen(PORT, () => {
+        console.log(`Servidor rodando na porta ${PORT}`);
+        console.log(`Socket.IO rodando para real-time features`);
+    });
+}
 
 module.exports = { app, server, io };
